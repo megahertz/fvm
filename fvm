@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+
+# FPC Version Manager: Simple bash script to manage multiple active
+# Free Pascal Compiler versions
+
+set -e
+
+download_fpcup() {
+  local fpcup="$(get_fpcup)"
+
+  if [ -f "${fpcup}" ] && "${fpcup}" --version; then
+    return
+  fi
+
+  local project_url='https://github.com/LongDirtyAnimAlf/Reiniero-fpcup'
+
+  mkdir -p "$(dirname "${fpcup}")"
+
+  curl -sL "${project_url}/releases/download/1.6.2j/fpcup-$(get_platform)" \
+    -o "${fpcup}"
+  chmod +x "${fpcup}"
+}
+
+download_fpc() {
+  local version="$1"
+  local dir="$2"
+  local verbose="$3"
+
+  local args=''
+  local brunch="${version%@*}"
+  local revision="${version/${brunch}@/}"
+
+  if [ "${version}" = "${revision}" ]; then
+    revision=''
+  fi
+
+  [ -n "${brunch}" ]      && args="${args} --fpcURL=${brunch}"
+  [ -n "${revision}" ]    && args="${args} --fpcrevision=${revision}"
+  [ "${verbose}" = true ] && args="${args} --verbose"
+
+  "$(get_fpcup)" \
+    --fpcbootstrapdir="$(get_data_dir)" \
+    --fpcdir="${dir}" \
+    --fpcuplinkname="" \
+    --logfilename="$(get_fpcup).log" \
+    --noconfirm \
+    ${args}
+
+  rm -rf "${dir}/.svn"
+}
+
+exception() {
+  local text="$@"
+  echo -e "\033[0;31m${text}\033[0m" 1>&2
+  exit 1
+}
+
+get_os() {
+  local os; os="$(uname -s)"
+  case "${os}" in
+    Linux*)    echo linux;;
+    Darwin*)   echo darwin;;
+    FreeBSD*)  echo freebsd;;
+    CYGWIN*)   echo windows;;
+    MINGW*)    echo windows;;
+    *)         exception "Unknown OS ${os}";;
+  esac
+}
+
+get_data_dir() {
+  echo "$(get_fvm_dir)/.data"
+}
+
+get_fpc_dir() {
+  local version="$1"
+  echo "$(get_fvm_dir)/${version}"
+}
+
+get_bin_dir() {
+  local version="$1"
+  echo "$(get_fpc_dir "${version}")/bin/$(get_platform)"
+}
+
+get_fvm_dir() {
+  if [ -n "${FVM_PATH}" ]; then
+    echo "${FVM_PATH}"
+  elif [ -n "${XDG_DATA_HOME}" ]; then
+    echo "${XDG_DATA_HOME}/fvm"
+  elif [ -d "${HOME}/.local/share" ]; then
+    echo "${HOME}/.local/share/fvm"
+  else
+    echo "${HOME}/.fvm"
+  fi
+}
+
+get_fpcup() {
+  echo "$(get_data_dir)/fpcup"
+}
+
+get_platform() {
+  echo "x86_64-$(get_os)"
+}
+
+install() {
+  local version="$1"
+  local verbose="$2"
+
+  local tmp_id; tmp_id="tmp-$(random)"
+  local tmp_dir; tmp_dir="$(get_fpc_dir "${tmp_id}")"
+
+  download_fpcup
+  download_fpc "${version}" "${tmp_dir}" "${verbose}"
+
+  local final_version; final_version="$("$(get_bin_dir "${tmp_id}")/fpc" -iW)"
+  local final_path; final_path="$(get_fpc_dir "${final_version}")"
+
+  move_fpc "${tmp_dir}" "${final_path}"
+
+  make_config "${final_version}"
+  use_fpc "${final_version}"
+
+  success "FPC ${final_version} is successfully installed to ${final_path}"
+}
+
+install_fvm() {
+  local data_dir; data_dir="$(get_data_dir)";
+
+  mkdir -p "${data_dir}"
+  cp "$0" "${data_dir}/fvm"
+  chmod +x "${data_dir}/fvm"
+
+  update_bash
+  update_fish
+
+  success "fvm is successfully installed to $(get_fvm_dir)"
+}
+
+main() {
+  local command="$1"
+  local version="$2"
+  local verbose=false
+
+  while [ $# -gt 0 ]; do case "$1" in
+    --verbose) verbose=true;;
+  esac; shift; done
+
+  case "${command}" in
+    install)     install "${version}" "${verbose}";;
+    install-fvm) install_fvm;;
+    ls)          ls -1 "$(get_fvm_dir)";;
+    use)         use_fpc "${version}" false;;
+    which)       which_fpc;;
+    *)           show_help
+  esac
+}
+
+move_fpc() {
+  local src="$1"
+  local dest="$2"
+
+  mv "${src}" "${dest}"
+  rm "${dest}/units"
+
+  local units; units="$(cd "${dest}"; cd lib/fpc/*/units; pwd)"
+  ln -s "${units}" "${dest}/units"
+}
+
+make_config() {
+  local version="$1"
+  local fpc_dir; fpc_dir="$(get_fpc_dir "${version}")"
+
+  mkdir "${fpc_dir}/bin/etc"
+  "$(get_bin_dir "${version}")/fpcmkcfg" \
+    -d basepath="${fpc_dir}" \
+    -o "${fpc_dir}/bin/etc/fpc.cfg"
+}
+
+random() {
+  cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1
+}
+
+show_help() {
+  echo 'Usage: fvm COMMAND [OPTIONS]
+
+Commands:
+  install [VERSION]  Install FPC, VERSION is branch@revision, for example:
+                       trunk, 3.0.4, trunk@39496, trunkgit, fixes3.2, newpascal,
+                       fixes3.0, 3.0.4, 3.0.0, 3.3.1, 3.3, fixes, fixes2.6
+  ls                 Show installed versions
+  use VERSION        Set the version as active
+  which              Return full path to the active fpc executable
+
+Options:
+  --verbose  Show output from svn and make.'
+}
+
+success() {
+  local text="$@"
+  echo -e "\033[0;32m${text}\033[0m"
+}
+
+update_bash() {
+  local version="$1"
+  local env_file; env_file="$(get_data_dir)/env.sh"
+
+  # Make ./data/env.sh
+  echo "FVM_PATH='$(get_fvm_dir)'" > "${env_file}"
+  echo "FVM_FPC_VERSION='"${version}"'" >> "${env_file}"
+  echo "alias fvm='$(get_data_dir)/fvm'" >> "${env_file}"
+
+  if [ -n "${version}" ]; then
+    echo "export PATH=\""$(get_bin_dir "${version}"):\${PATH}\""" >> "${env_file}"
+  fi
+
+  # Add env.sh to .bashrc
+  local saved=false
+
+  for rc in '.bashrc' '.profile' '.zshrc' '.bash_profile'; do
+    local f="${HOME}/${rc}"
+
+    [ ! -f "${f}" ] && continue
+
+    saved=true
+
+    sed -i '/fvm\/.data/d' "${f}"
+    echo "source '${env_file}'" >> "${f}"
+  done
+
+  if [ "${saved}" = false ]; then
+    echo "source '${env_file}'" >> ~/.bashrc
+  fi
+
+  source "${env_file}"
+}
+
+update_fish() {
+  local version="$1"
+
+  # Make ./data/env.fish
+  local env_file; env_file="$(get_data_dir)/env.fish"
+
+  local fish_config_dir
+  if [ -d "${XDG_CONFIG_HOME}/fish" ]; then
+    fish_config_dir="${XDG_CONFIG_HOME}/fish"
+  elif [ -d "${HOME}/.config/fish" ]; then
+    fish_config_dir="${HOME}/.config/fish"
+  else
+    return
+  fi
+
+  echo "set -x FVM_PATH '$(get_fvm_dir)'" > "${env_file}"
+  echo "set -x FVM_FPC_VERSION '"${version}"'" >> "${env_file}"
+
+  if [ -n "${version}" ]; then
+    echo "set PATH "$(get_bin_dir "${version}")" \$PATH" >> "${env_file}"
+  fi
+
+  echo "" >> "${env_file}"
+  echo "function fvm" >> "${env_file}"
+  echo "  '$(get_data_dir)/fvm' \$argv" >> "${env_file}"
+  echo "end" >> "${env_file}"
+
+  # Add env.fish to .config.fish
+  local fish_config="${fish_config_dir}/config.fish"
+
+  if [ -f "${fish_config}" ]; then
+    sed -i '/fvm\/.data/d' "${fish_config}"
+  fi
+
+  echo "source '${env_file}'" >> "${fish_config}"
+}
+
+use_fpc() {
+  local version_pattern="$1"
+  local silent="$2:-true"
+
+  local available; available="$(ls -m "$(get_fvm_dir)")";
+  if [ -z available ]; then
+    exception 'There are no installed version. run `fvm install` first'
+  fi
+
+  if [ -z "${version_pattern}" ]; then
+    exception "No version specified, available are: ${available}"
+  fi
+
+  local version; version="$(
+    ls -1 "$(get_fvm_dir)" |
+    grep -F "${version_pattern}" |
+    head -n 1
+  )"
+
+  if [ -z "${version}" ]; then
+    exception "FPC ${version_pattern} not found. Available are: ${available}"
+  fi
+
+  local fpc="$(get_fpc_dir "${version}")"
+  if [ ! -d "${fpc}" ]; then
+    exception "FPC isn't installed at ${fpc}"
+  fi
+
+  echo "${fpc}" > "$(get_data_dir)/path"
+
+  update_bash "${version}"
+  update_fish "${version}"
+
+  if [ "${silent}" = false ]; then
+    success "The current fpc is set to ${fpc}"
+  fi
+}
+
+which_fpc() {
+  local env_file; env_file="$(get_data_dir)/env.sh"
+  local version; version="$(
+    grep -oP "(?<=FVM_FPC_VERSION=')[\w.-]+" "${env_file}"
+  )"
+  local fpc="$(get_bin_dir "${version}")/fpc"
+
+  if [ -f "${fpc}" ]; then
+    echo "${fpc}"
+  else
+    exception "Current FPC version is not set"
+  fi
+}
+
+main $@
