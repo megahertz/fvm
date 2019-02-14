@@ -311,14 +311,14 @@ use_fpc() {
 which_fpc() {
   local env_file; env_file="$(get_data_dir)/env.sh"
   local version; version="$(
-    grep -oP "(?<=FVM_FPC_VERSION=')[\w.-]+" "${env_file}"
+    grep -oP "(?<=FVM_FPC_VERSION=')[\w.-]+" "${env_file}" || echo ''
   )"
-  local fpc="$(get_bin_dir "${version}")/fpc"
+  local fpc; fpc="$(get_bin_dir "${version}")/fpc"
 
   if [ -f "${fpc}" ]; then
     echo "${fpc}"
   else
-    exception "Current FPC version is not set"
+    exception 'Current FPC version is not set'
   fi
 }
 
