@@ -45,7 +45,7 @@ Show installed versions
 
 `fvm ls`
 
-Set active version (you can spcecify a full version, or the first part)
+Set active version (you can specify a full version, or the first part)
 
 `fvm use 3.1`
 
