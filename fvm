@@ -16,7 +16,7 @@ download_fpcup() {
 
   mkdir -p "$(dirname "${fpcup}")"
 
-  curl -sL "${project_url}/releases/download/1.6.2j/fpcup-$(get_platform)" \
+  curl -sL "${project_url}/releases/download/1.8.2s/fpcup-$(get_platform)" \
     -o "${fpcup}"
   chmod +x "${fpcup}"
 }
@@ -275,7 +275,7 @@ use_fpc() {
   local silent="$2:-true"
 
   local available; available="$(ls -m "$(get_fvm_dir)")";
-  if [ -z available ]; then
+  if [ -z "${available}" ]; then
     exception 'There are no installed version. run `fvm install` first'
   fi
 
@@ -322,4 +322,5 @@ which_fpc() {
   fi
 }
 
+# shellcheck disable=SC2068
 main $@
